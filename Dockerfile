@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install system dependencie s
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cron \
     procps \
