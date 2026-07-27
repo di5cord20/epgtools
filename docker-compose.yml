@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  epgtools:
+    image: ghcr.io/di5cord20/epgtools:latest
+    container_name: epgtools
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./cache:/app/cache
+    environment:
+      - PYTHONUNBUFFERED=1
