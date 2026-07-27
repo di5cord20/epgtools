@@ -37,85 +37,69 @@ CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 GLOBAL_LISTBOX_JS = """
 async () => {
+    // Selection logic for div-based listboxes
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('listbox-item')) {
+            e.target.classList.toggle('selected');
+        }
+    });
+
     globalThis.filterAvailableList = function() {
         var input = document.getElementById('listbox_search');
         if (!input) return;
         var filter = input.value.toLowerCase();
-        var select = document.getElementById('left_listbox');
-        if (!select) return;
-        var options = select.options;
-        for (var i = 0; i < options.length; i++) {
-            var txt = options[i].text.toLowerCase();
-            options[i].style.display = txt.includes(filter) ? "" : "none";
-        }
+        var items = document.querySelectorAll('#left_listbox .listbox-item');
+        items.forEach(item => {
+            var txt = item.innerText.toLowerCase();
+            item.style.display = txt.includes(filter) ? "" : "none";
+        });
     };
 
     globalThis.moveSelected = function(fromId, toId) {
         var fromBox = document.getElementById(fromId);
         var toBox = document.getElementById(toId);
-        if (!fromBox || !toBox) return;
-        var selected = Array.from(fromBox.selectedOptions);
-        selected.forEach(option => {
-            option.selected = false;
-            toBox.appendChild(option);
+        var selected = fromBox.querySelectorAll('.selected');
+        selected.forEach(item => {
+            item.classList.remove('selected');
+            toBox.appendChild(item);
         });
-        globalThis.sortSelectBox(toBox);
+        globalThis.sortListBox(toBox);
         globalThis.updateLabelsAndSync();
     };
 
     globalThis.moveAll = function(fromId, toId) {
         var fromBox = document.getElementById(fromId);
         var toBox = document.getElementById(toId);
-        if (!fromBox || !toBox) return;
-        var options = Array.from(fromBox.options).filter(opt => opt.style.display !== "none");
-        options.forEach(option => {
-            option.selected = false;
-            toBox.appendChild(option);
+        var items = Array.from(fromBox.querySelectorAll('.listbox-item'))
+                         .filter(i => i.style.display !== "none");
+        items.forEach(item => {
+            item.classList.remove('selected');
+            toBox.appendChild(item);
         });
-        globalThis.sortSelectBox(toBox);
+        globalThis.sortListBox(toBox);
         globalThis.updateLabelsAndSync();
     };
 
-    globalThis.sortSelectBox = function(box) {
-        var tmp = Array.from(box.options);
-        tmp.sort((a, b) => a.text.localeCompare(b.text));
+    globalThis.sortListBox = function(box) {
+        var items = Array.from(box.querySelectorAll('.listbox-item'));
+        items.sort((a, b) => a.innerText.localeCompare(b.innerText));
         box.innerHTML = "";
-        tmp.forEach(opt => box.add(opt));
+        items.forEach(item => box.appendChild(item));
     };
 
     globalThis.updateLabelsAndSync = function() {
         var leftBox = document.getElementById('left_listbox');
         var rightBox = document.getElementById('right_listbox');
-        var leftLabel = document.getElementById('left_listbox_label');
-        var rightLabel = document.getElementById('right_listbox_label');
+        document.getElementById('left_listbox_label').innerText = "Available Channels (" + leftBox.children.length + ")";
+        document.getElementById('right_listbox_label').innerText = "Selected Channels (" + rightBox.children.length + ")";
 
-        if (leftBox && leftLabel) {
-            leftLabel.innerText = "Available Channels (" + leftBox.options.length + ")";
-        }
-        if (rightBox && rightLabel) {
-            rightLabel.innerText = "Selected Channels (" + rightBox.options.length + ")";
-        }
-
-        if (!rightBox) return;
-        var selectedChannels = Array.from(rightBox.options).map(opt => opt.value);
+        var selectedChannels = Array.from(rightBox.children).map(i => i.innerText);
         var jsonStr = JSON.stringify(selectedChannels);
-
-        var hiddenInput = document.querySelector("#hidden_json_input textarea, #hidden_json_input input");
+        
+        var hiddenInput = document.querySelector("#hidden_json_input textarea");
         if (hiddenInput) {
-            var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLTextAreaElement.prototype, "value"
-            ) || Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype, "value"
-            );
-
-            if (nativeInputValueSetter && nativeInputValueSetter.set) {
-                nativeInputValueSetter.set.call(hiddenInput, jsonStr);
-            } else {
-                hiddenInput.value = jsonStr;
-            }
-
+            hiddenInput.value = jsonStr;
             hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
-            hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
     };
 }
@@ -149,40 +133,35 @@ def fetch_channel_list(list_url_or_path: str) -> List[str]:
 
 
 def render_dual_listbox(avail_channels: List[str], selected_channels: List[str]) -> str:
-    avail_options = "".join([f'<option value="{ch}">{ch}</option>' for ch in avail_channels])
-    sel_options = "".join([f'<option value="{ch}">{ch}</option>' for ch in selected_channels])
+    # Helper to build the item divs
+    def build_items(channels):
+        return "".join([f'<div class="listbox-item" style="padding: 5px; cursor: pointer; border-bottom: 1px solid #2d3748;">{ch}</div>' for ch in channels])
 
     return f"""
-    <div style="font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; gap: 10px;">
-        <div style="display: flex; gap: 10px;">
-            <input type="text" id="listbox_search" placeholder="Type to filter available channels..." 
-                   onkeyup="globalThis.filterAvailableList()" 
-                   style="flex: 1; padding: 10px; border: 1px solid #4a5568; border-radius: 6px; background: #1a202c; color: #f7fafc; font-size: 14px;" />
-        </div>
-        <div style="display: flex; gap: 15px; align-items: center; justify-content: space-between;">
-            <div style="flex: 1; display: flex; flex-direction: column;">
-                <label id="left_listbox_label" style="font-weight: 600; margin-bottom: 6px; color: #e2e8f0;">Available Channels ({len(avail_channels)})</label>
-                <select id="left_listbox" multiple size="20" 
-                        style="width: 100%; height: 420px; padding: 8px; border-radius: 6px; background: #1a202c; color: #edf2f7; border: 1px solid #4a5568;" 
-                        ondblclick="globalThis.moveSelected('left_listbox', 'right_listbox')">
-                    {avail_options}
-                </select>
+    <style>
+        .listbox-item.selected {{ background-color: #3182ce !important; color: white; }}
+        .listbox-item:hover {{ background-color: #2d3748; }}
+        .listbox-container {{ height: 420px; overflow-y: auto; background: #1a202c; border: 1px solid #4a5568; border-radius: 6px; }}
+    </style>
+    <div style="font-family: system-ui, sans-serif; display: flex; flex-direction: column; gap: 10px;">
+        <input type="text" id="listbox_search" placeholder="Filter..." onkeyup="globalThis.filterAvailableList()" style="padding: 10px; border-radius: 6px; background: #1a202c; color: white; border: 1px solid #4a5568;" />
+        
+        <div style="display: flex; gap: 15px;">
+            <div style="flex: 1;">
+                <label id="left_listbox_label" style="font-weight: bold;">Available ({len(avail_channels)})</label>
+                <div id="left_listbox" class="listbox-container">{build_items(avail_channels)}</div>
             </div>
             
-            <div style="display: flex; flex-direction: column; gap: 10px; width: 65px; margin-top: 20px;">
-                <button type="button" onclick="globalThis.moveAll('left_listbox', 'right_listbox')" style="padding: 10px; cursor: pointer; border-radius: 6px; background: #3182ce; color: white; border: none; font-weight: bold; font-size: 16px;">&gt;&gt;</button>
-                <button type="button" onclick="globalThis.moveSelected('left_listbox', 'right_listbox')" style="padding: 10px; cursor: pointer; border-radius: 6px; background: #2b6cb0; color: white; border: none; font-weight: bold; font-size: 16px;">&gt;</button>
-                <button type="button" onclick="globalThis.moveSelected('right_listbox', 'left_listbox')" style="padding: 10px; cursor: pointer; border-radius: 6px; background: #2b6cb0; color: white; border: none; font-weight: bold; font-size: 16px;">&lt;</button>
-                <button type="button" onclick="globalThis.moveAll('right_listbox', 'left_listbox')" style="padding: 10px; cursor: pointer; border-radius: 6px; background: #3182ce; color: white; border: none; font-weight: bold; font-size: 16px;">&lt;&lt;</button>
+            <div style="display: flex; flex-direction: column; justify-content: center; gap: 10px;">
+                <button onclick="globalThis.moveAll('left_listbox', 'right_listbox')"> &gt;&gt; </button>
+                <button onclick="globalThis.moveSelected('left_listbox', 'right_listbox')"> &gt; </button>
+                <button onclick="globalThis.moveSelected('right_listbox', 'left_listbox')"> &lt; </button>
+                <button onclick="globalThis.moveAll('right_listbox', 'left_listbox')"> &lt;&lt; </button>
             </div>
 
-            <div style="flex: 1; display: flex; flex-direction: column;">
-                <label id="right_listbox_label" style="font-weight: 600; margin-bottom: 6px; color: #e2e8f0;">Selected Channels ({len(selected_channels)})</label>
-                <select id="right_listbox" multiple size="20" 
-                        style="width: 100%; height: 420px; padding: 8px; border-radius: 6px; background: #1a202c; color: #edf2f7; border: 1px solid #4a5568;" 
-                        ondblclick="globalThis.moveSelected('right_listbox', 'left_listbox')">
-                    {sel_options}
-                </select>
+            <div style="flex: 1;">
+                <label id="right_listbox_label" style="font-weight: bold;">Selected ({len(selected_channels)})</label>
+                <div id="right_listbox" class="listbox-container">{build_items(selected_channels)}</div>
             </div>
         </div>
     </div>
