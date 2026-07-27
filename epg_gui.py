@@ -194,7 +194,7 @@ def handle_source_change(preset_selection: str):
         list_url = EPG_GURU_PRESETS[preset_selection]["channel_list"]
         xml_url = EPG_GURU_PRESETS[preset_selection]["xml_source"]
     else:
-        return "", "", render_dual_listbox([], []), "[]", "Invalid source preset selected."
+        return "", "", gr.update(value=render_dual_listbox([], [])), "[]", "Invalid source preset selected."
 
     try:
         channels = fetch_channel_list(list_url)
@@ -202,12 +202,12 @@ def handle_source_change(preset_selection: str):
         return (
             list_url,
             xml_url,
-            render_dual_listbox(channels, []),
+            gr.update(value=render_dual_listbox(channels, [])),
             "[]",
             status,
         )
     except Exception as e:
-        return list_url, xml_url, render_dual_listbox([], []), "[]", f"Error: {e}"
+        return list_url, xml_url, gr.update(value=render_dual_listbox([], [])), "[]", f"Error: {e}"
 
 
 def list_existing_configs():
@@ -218,7 +218,7 @@ def list_existing_configs():
 def load_existing_config(config_filename: str, active_list_url: str):
     if not config_filename:
         return (
-            render_dual_listbox([], []),
+            gr.update(value=render_dual_listbox([], [])),
             "[]",
             "",
             "",
@@ -229,7 +229,7 @@ def load_existing_config(config_filename: str, active_list_url: str):
     file_path = CONFIG_DIR / config_filename
     if not file_path.exists():
         return (
-            render_dual_listbox([], []),
+            gr.update(value=render_dual_listbox([], [])),
             "[]",
             "",
             "",
@@ -263,7 +263,7 @@ def load_existing_config(config_filename: str, active_list_url: str):
     remaining_avail = [ch for ch in avail_channels if ch not in loaded_channels]
 
     return (
-        render_dual_listbox(remaining_avail, sorted(loaded_channels)),
+        gr.update(value=render_dual_listbox(remaining_avail, sorted(loaded_channels))),
         json.dumps(sorted(loaded_channels)),
         config_filename.replace(".txt", ""),
         xml_source,
@@ -455,8 +455,10 @@ with gr.Blocks(title="EPG Config Builder") as app:
         outputs=[merge_output_log],
     )
 
+    # Attach JS first
     app.load(fn=None, inputs=None, outputs=None, js=GLOBAL_LISTBOX_JS)
 
+    # Initial loading of presets and files
     app.load(
         fn=handle_source_change,
         inputs=[preset_dropdown],
