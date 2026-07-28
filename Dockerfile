@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code and scripts
 COPY epg_gui.py epg_merge.py run_all.sh entrypoint.sh ./
+COPY templates/ ./templates/
 
 # Set execution permissions
 RUN chmod +x run_all.sh entrypoint.sh
