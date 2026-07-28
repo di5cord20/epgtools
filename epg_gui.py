@@ -202,4 +202,8 @@ def api_run_merge():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7860)
+    from waitress import serve
+    # threads=8: enough that one slow /api/channels or /api/run-merge call
+    # (which can take minutes for a large region) no longer blocks every
+    # other request -- the actual cause of the app appearing to "hang".
+    serve(app, host="0.0.0.0", port=7860, threads=8)
