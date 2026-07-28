@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EPG Channel Configurator &amp; Merger</title>
+<style>
+  :root {
+    --bg: #12161a;
+    --panel: #1a2025;
+    --panel-raised: #212830;
+    --border: #2b333b;
+    --text: #e6e9ec;
+    --muted: #8b96a1;
+    --accent: #4fb3a9;
+    --accent-hover: #63c7bd;
+    --accent-dim: #2e4a47;
+    --danger: #d9636b;
+    --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: 14px; line-height: 1.5; }
+  header { padding: 20px 28px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 17px; font-weight: 600; margin: 0; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 28px; }
+  section { margin-bottom: 26px; padding-bottom: 22px; border-bottom: 1px solid var(--border); }
+  section:last-child { border-bottom: none; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 12px 0; font-weight: 600; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  select, input[type=text] { width: 100%; background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 8px 10px; font-family: var(--font-ui); font-size: 13px; }
+  input:focus, select:focus, button:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 160px; }
+  button { background: var(--panel-raised); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 8px 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.primary { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-hover); font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: var(--accent); color: #0c1214; }
+  .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  #status { font-size: 12px; color: var(--muted); min-height: 16px; margin-top: 8px; }
+  #status.error, .field-status.error { color: var(--danger); }
+  #status.ok, .field-status.ok { color: var(--accent); }
+  .field-status { font-size: 12px; min-height: 16px; margin-top: 6px; color: var(--muted); }
+  .dual-listbox { display: flex; gap: 14px; align-items: stretch; }
+  .listbox-col { flex: 1; min-width: 0; }
+  .listbox-col label { font-weight: 600; color: var(--text); }
+  .listbox { height: 420px; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+  .listbox-item { padding: 6px 10px; cursor: pointer; border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; user-select: none; }
+  .listbox-item:last-child { border-bottom: none; }
+  .listbox-item:hover { background: var(--panel-raised); }
+  .listbox-item.selected { background: var(--accent-dim); color: var(--accent-hover); }
+  .move-buttons { display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+  .move-buttons button { width: 48px; }
+  #searchInput { margin-bottom: 10px; }
+  pre#logPanel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; height: 260px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; margin: 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>EPG Channel Configurator &amp; Merger <span>— Flask edition</span></h1>
+</header>
+
+<main>
+  <section>
+    <h2>Source &amp; saved configs</h2>
+    <div class="row">
+      <div>
+        <label for="presetSelect">1. EPG source region</label>
+        <select id="presetSelect"></select>
+      </div>
+      <div>
+        <label for="configSelect">Load saved config</label>
+        <select id="configSelect"><option value="">— select —</option></select>
+      </div>
+      <div style="flex:0;"><button id="loadConfigBtn">Load Config</button></div>
+    </div>
+    <div id="status"></div>
+  </section>
+
+  <section>
+    <h2>2. Channel selection</h2>
+    <input type="text" id="searchInput" placeholder="Filter available channels...">
+    <div class="dual-listbox">
+      <div class="listbox-col">
+        <label id="availLabel">Available (0)</label>
+        <div class="listbox" id="availList"></div>
+      </div>
+      <div class="move-buttons">
+        <button id="moveAllRightBtn" title="Move all filtered">&gt;&gt;</button>
+        <button id="moveRightBtn" title="Move selected">&gt;</button>
+        <button id="moveLeftBtn" title="Move selected back">&lt;</button>
+        <button id="moveAllLeftBtn" title="Move all back">&lt;&lt;</button>
+      </div>
+      <div class="listbox-col">
+        <label id="selectedLabel">Selected (0)</label>
+        <div class="listbox" id="selectedListEl"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Save &amp; output</h2>
+    <div class="row">
+      <div>
+        <label for="saveNameInput">Config output filename</label>
+        <input type="text" id="saveNameInput" placeholder="e.g. canada or uk">
+      </div>
+      <div style="flex:0;"><button class="primary" id="saveBtn">Save Configuration</button></div>
+    </div>
+    <div class="field-status" id="saveStatus"></div>
+  </section>
+
+  <section>
+    <h2>Run merger directly</h2>
+    <p style="color: var(--muted); font-size: 12px; margin-top: -6px;">Save or load a config first to enable the run button.</p>
+    <div class="row">
+      <div class="checkbox-row"><input type="checkbox" id="forceChk"><label for="forceChk" style="margin:0;">Force re-download (-f)</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="deleteChk"><label for="deleteChk" style="margin:0;">Delete uncompressed XML (-d)</label></div>
+      <div style="flex:0;"><button id="runMergeBtn" disabled>Run epg_merge.py Now</button></div>
+    </div>
+    <pre id="logPanel">Output will appear here...</pre>
+  </section>
+</main>
+
+<script>
+const state = {
+  presets: {},
+  currentXmlSource: "",
+  available: [],   // array of channel id strings not yet selected
+  selected: new Set(),
+  selectedOrder: [],  // preserves an order for display
+  currentConfigName: "",
+};
+
+function setStatus(el, msg, cls) {
+  el.textContent = msg;
+  el.className = cls ? `field-status ${cls}` : "field-status";
+}
+
+async function fetchPresets() {
+  const res = await fetch("/api/presets");
+  state.presets = await res.json();
+  const sel = document.getElementById("presetSelect");
+  sel.innerHTML = "";
+  Object.keys(state.presets).forEach(label => {
+    const opt = document.createElement("option");
+    opt.value = label;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  });
+}
+
+async function fetchConfigs() {
+  const res = await fetch("/api/configs");
+  const names = await res.json();
+  const sel = document.getElementById("configSelect");
+  sel.innerHTML = '<option value="">— select —</option>';
+  names.forEach(n => {
+    const opt = document.createElement("option");
+    opt.value = n;
+    opt.textContent = n;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadChannelsForPreset(label, excludeIds) {
+  const statusEl = document.getElementById("status");
+  const preset = state.presets[label];
+  if (!preset) return;
+  state.currentXmlSource = preset.xml_source;
+  setStatus(statusEl, `Loading channel list for ${label}...`, "");
+  try {
+    const res = await fetch(`/api/channels?list=${encodeURIComponent(preset.channel_list)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load channel list");
+    const exclude = new Set(excludeIds || []);
+    state.available = data.channels.filter(ch => !exclude.has(ch));
+    renderAvailable();
+    setStatus(statusEl, `Loaded ${data.channels.length} channels for ${label}.`, "ok");
+  } catch (e) {
+    state.available = [];
+    renderAvailable();
+    setStatus(statusEl, "Error: " + e.message, "error");
+  }
+}
+
+function renderAvailable() {
+  const q = document.getElementById("searchInput").value.trim().toLowerCase();
+  const list = document.getElementById("availList");
+  list.innerHTML = "";
+  const filtered = state.available.filter(ch => !q || ch.toLowerCase().includes(q));
+  filtered.forEach(ch => {
+    const div = document.createElement("div");
+    div.className = "listbox-item";
+    div.textContent = ch;
+    div.dataset.value = ch;
+    div.addEventListener("click", () => div.classList.toggle("selected"));
+    list.appendChild(div);
+  });
+  document.getElementById("availLabel").textContent = `Available (${state.available.length})`;
+}
+
+function renderSelected() {
+  const list = document.getElementById("selectedListEl");
+  list.innerHTML = "";
+  state.selectedOrder.slice().sort((a, b) => a.localeCompare(b)).forEach(ch => {
+    const div = document.createElement("div");
+    div.className = "listbox-item";
+    div.textContent = ch;
+    div.dataset.value = ch;
+    div.addEventListener("click", () => div.classList.toggle("selected"));
+    list.appendChild(div);
+  });
+  document.getElementById("selectedLabel").textContent = `Selected (${state.selectedOrder.length})`;
+}
+
+document.getElementById("searchInput").addEventListener("input", renderAvailable);
+
+document.getElementById("presetSelect").addEventListener("change", (e) => {
+  state.selected = new Set();
+  state.selectedOrder = [];
+  renderSelected();
+  loadChannelsForPreset(e.target.value, []);
+});
+
+document.getElementById("moveRightBtn").addEventListener("click", () => {
+  document.querySelectorAll("#availList .listbox-item.selected").forEach(el => {
+    const val = el.dataset.value;
+    if (!state.selected.has(val)) {
+      state.selected.add(val);
+      state.selectedOrder.push(val);
+    }
+    state.available = state.available.filter(ch => ch !== val);
+  });
+  renderAvailable();
+  renderSelected();
+});
+
+document.getElementById("moveAllRightBtn").addEventListener("click", () => {
+  const q = document.getElementById("searchInput").value.trim().toLowerCase();
+  const moving = state.available.filter(ch => !q || ch.toLowerCase().includes(q));
+  moving.forEach(val => {
+    if (!state.selected.has(val)) {
+      state.selected.add(val);
+      state.selectedOrder.push(val);
+    }
+  });
+  state.available = state.available.filter(ch => !moving.includes(ch));
+  renderAvailable();
+  renderSelected();
+});
+
+document.getElementById("moveLeftBtn").addEventListener("click", () => {
+  document.querySelectorAll("#selectedListEl .listbox-item.selected").forEach(el => {
+    const val = el.dataset.value;
+    state.selected.delete(val);
+    state.selectedOrder = state.selectedOrder.filter(ch => ch !== val);
+    if (!state.available.includes(val)) state.available.push(val);
+  });
+  renderAvailable();
+  renderSelected();
+});
+
+document.getElementById("moveAllLeftBtn").addEventListener("click", () => {
+  state.selectedOrder.forEach(val => {
+    if (!state.available.includes(val)) state.available.push(val);
+  });
+  state.selected = new Set();
+  state.selectedOrder = [];
+  renderAvailable();
+  renderSelected();
+});
+
+document.getElementById("loadConfigBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("status");
+  const name = document.getElementById("configSelect").value;
+  if (!name) { setStatus(statusEl, "Pick a saved config first.", "error"); return; }
+
+  setStatus(statusEl, "Loading config...", "");
+  try {
+    const res = await fetch(`/api/configs/${encodeURIComponent(name)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Load failed");
+
+    state.currentXmlSource = data.xml_source || "";
+    state.selectedOrder = data.channels.slice();
+    state.selected = new Set(data.channels);
+    state.currentConfigName = name.replace(/\.txt$/, "");
+    document.getElementById("saveNameInput").value = state.currentConfigName;
+
+    // Re-pull the matching preset's full channel list (if we can find one
+    // whose xml_source matches) so "Available" reflects what's left.
+    const matchedLabel = Object.keys(state.presets).find(
+      l => state.presets[l].xml_source === state.currentXmlSource
+    );
+    if (matchedLabel) {
+      document.getElementById("presetSelect").value = matchedLabel;
+      await loadChannelsForPreset(matchedLabel, state.selectedOrder);
+    } else {
+      state.available = [];
+      renderAvailable();
+    }
+    renderSelected();
+    document.getElementById("runMergeBtn").disabled = false;
+    setStatus(statusEl, `Loaded ${data.channels.length} channels from ${name}.`, "ok");
+  } catch (e) {
+    setStatus(statusEl, "Error: " + e.message, "error");
+  }
+});
+
+document.getElementById("saveBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("saveStatus");
+  const name = document.getElementById("saveNameInput").value.trim();
+  if (!name) { setStatus(statusEl, "Enter a config filename.", "error"); return; }
+  if (!state.currentXmlSource) { setStatus(statusEl, "Pick a source region first.", "error"); return; }
+  if (state.selectedOrder.length === 0) { setStatus(statusEl, "Select at least one channel.", "error"); return; }
+
+  try {
+    const res = await fetch(`/api/configs/${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ xml_source: state.currentXmlSource, channels: state.selectedOrder }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Save failed");
+    state.currentConfigName = data.filename.replace(/\.txt$/, "");
+    setStatus(statusEl, `Saved ${data.count} channels to ${data.saved}`, "ok");
+    document.getElementById("runMergeBtn").disabled = false;
+    fetchConfigs();
+  } catch (e) {
+    setStatus(statusEl, "Error: " + e.message, "error");
+  }
+});
+
+document.getElementById("runMergeBtn").addEventListener("click", async () => {
+  const logPanel = document.getElementById("logPanel");
+  const btn = document.getElementById("runMergeBtn");
+  if (!state.currentConfigName) return;
+
+  logPanel.textContent = "";
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/run-merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        config_name: state.currentConfigName,
+        force: document.getElementById("forceChk").checked,
+        delete_uncompressed: document.getElementById("deleteChk").checked,
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      logPanel.textContent = "Error: " + (data.error || "Request failed");
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop();
+      for (const evt of events) {
+        const match = evt.match(/^data:\s*(.*)$/m);
+        if (!match) continue;
+        const payload = JSON.parse(match[1]);
+        if (payload.line) {
+          logPanel.textContent += payload.line + "\n";
+          logPanel.scrollTop = logPanel.scrollHeight;
+        }
+        if (payload.done) {
+          logPanel.textContent += `\n[process exited with code ${payload.returncode}]\n`;
+        }
+      }
+    }
+  } catch (e) {
+    logPanel.textContent += "\nError: " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+(async function init() {
+  await fetchPresets();
+  await fetchConfigs();
+  const firstLabel = Object.keys(state.presets)[0];
+  if (firstLabel) {
+    document.getElementById("presetSelect").value = firstLabel;
+    await loadChannelsForPreset(firstLabel, []);
+  }
+})();
+</script>
+
+</body>
+</html>
