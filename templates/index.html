@@ -72,10 +72,22 @@
         <select id="presetSelect"></select>
       </div>
       <div>
+        <label>XML variant</label>
+        <div class="checkbox-row" style="gap:16px; padding: 8px 0;">
+          <label style="display:flex; align-items:center; gap:5px; margin:0; color: var(--text);">
+            <input type="radio" name="variant" value="iptv" id="variantIptv" checked> IPTV
+          </label>
+          <label style="display:flex; align-items:center; gap:5px; margin:0; color: var(--text);">
+            <input type="radio" name="variant" value="gracenote" id="variantGracenote"> Gracenote
+          </label>
+        </div>
+      </div>
+      <div>
         <label for="configSelect">Load saved config</label>
         <select id="configSelect"><option value="">— select —</option></select>
       </div>
       <div style="flex:0;"><button id="loadConfigBtn">Load Config</button></div>
+      <div style="flex:0;"><button id="deleteConfigBtn">Delete Config</button></div>
     </div>
     <div id="status"></div>
   </section>
@@ -133,7 +145,46 @@ const state = {
   selected: new Set(),
   selectedOrder: [],  // preserves an order for display
   currentConfigName: "",
+  lastAvailIndex: null,
+  lastSelectedIndex: null,
+  currentSlug: "",
 };
+
+// Both IPTV and Gracenote feeds share the same URL shape per region --
+// only the "7dayiptv" / "7daygracenote" segment differs.
+function getSelectedVariant() {
+  return document.querySelector('input[name="variant"]:checked').value;
+}
+
+function computeXmlSource(slug, variant) {
+  return `https://cdn.epg.guru/7day${variant}/${slug}.xml`;
+}
+
+// Recovers {variant, slug} from a saved config's stored xml_source, so
+// loading a config can restore which region + variant produced it.
+function parseXmlSource(url) {
+  const m = (url || "").match(/^https:\/\/cdn\.epg\.guru\/7day(iptv|gracenote)\/(.+)\.xml$/);
+  return m ? { variant: m[1], slug: m[2] } : null;
+}
+
+// Shared click handler for listbox items: plain click toggles just that
+// item (without touching others, so clicking several items one at a time
+// still multi-selects). Shift-click selects the whole range between the
+// last-clicked item and this one, mirroring standard file-picker behavior.
+function attachRangeClick(el, index, container, lastIndexKey) {
+  el.addEventListener("click", (e) => {
+    const items = Array.from(container.children);
+    if (e.shiftKey && state[lastIndexKey] !== null) {
+      const [start, end] = [state[lastIndexKey], index].sort((a, b) => a - b);
+      for (let i = start; i <= end; i++) {
+        items[i].classList.add("selected");
+      }
+    } else {
+      el.classList.toggle("selected");
+    }
+    state[lastIndexKey] = index;
+  });
+}
 
 function setStatus(el, msg, cls) {
   el.textContent = msg;
@@ -170,7 +221,8 @@ async function loadChannelsForPreset(label, excludeIds) {
   const statusEl = document.getElementById("status");
   const preset = state.presets[label];
   if (!preset) return;
-  state.currentXmlSource = preset.xml_source;
+  state.currentSlug = preset.slug;
+  state.currentXmlSource = computeXmlSource(preset.slug, getSelectedVariant());
   setStatus(statusEl, `Loading channel list for ${label}...`, "");
   try {
     const res = await fetch(`/api/channels?list=${encodeURIComponent(preset.channel_list)}`);
@@ -188,30 +240,32 @@ async function loadChannelsForPreset(label, excludeIds) {
 }
 
 function renderAvailable() {
+  state.lastAvailIndex = null;
   const q = document.getElementById("searchInput").value.trim().toLowerCase();
   const list = document.getElementById("availList");
   list.innerHTML = "";
   const filtered = state.available.filter(ch => !q || ch.toLowerCase().includes(q));
-  filtered.forEach(ch => {
+  filtered.forEach((ch, i) => {
     const div = document.createElement("div");
     div.className = "listbox-item";
     div.textContent = ch;
     div.dataset.value = ch;
-    div.addEventListener("click", () => div.classList.toggle("selected"));
+    attachRangeClick(div, i, list, "lastAvailIndex");
     list.appendChild(div);
   });
   document.getElementById("availLabel").textContent = `Available (${state.available.length})`;
 }
 
 function renderSelected() {
+  state.lastSelectedIndex = null;
   const list = document.getElementById("selectedListEl");
   list.innerHTML = "";
-  state.selectedOrder.slice().sort((a, b) => a.localeCompare(b)).forEach(ch => {
+  state.selectedOrder.slice().sort((a, b) => a.localeCompare(b)).forEach((ch, i) => {
     const div = document.createElement("div");
     div.className = "listbox-item";
     div.textContent = ch;
     div.dataset.value = ch;
-    div.addEventListener("click", () => div.classList.toggle("selected"));
+    attachRangeClick(div, i, list, "lastSelectedIndex");
     list.appendChild(div);
   });
   document.getElementById("selectedLabel").textContent = `Selected (${state.selectedOrder.length})`;
@@ -224,6 +278,13 @@ document.getElementById("presetSelect").addEventListener("change", (e) => {
   state.selectedOrder = [];
   renderSelected();
   loadChannelsForPreset(e.target.value, []);
+});
+
+document.querySelectorAll('input[name="variant"]').forEach(radio => {
+  radio.addEventListener("change", () => {
+    if (!state.currentSlug) return;
+    state.currentXmlSource = computeXmlSource(state.currentSlug, getSelectedVariant());
+  });
 });
 
 document.getElementById("moveRightBtn").addEventListener("click", () => {
@@ -291,13 +352,18 @@ document.getElementById("loadConfigBtn").addEventListener("click", async () => {
     state.currentConfigName = name.replace(/\.txt$/, "");
     document.getElementById("saveNameInput").value = state.currentConfigName;
 
-    // Re-pull the matching preset's full channel list (if we can find one
-    // whose xml_source matches) so "Available" reflects what's left.
-    const matchedLabel = Object.keys(state.presets).find(
-      l => state.presets[l].xml_source === state.currentXmlSource
-    );
+    // Recover which region + variant produced this xml_source, so the
+    // dropdown and radio buttons reflect it rather than resetting.
+    const parsed = parseXmlSource(state.currentXmlSource);
+    const matchedLabel = parsed
+      ? Object.keys(state.presets).find(l => state.presets[l].slug === parsed.slug)
+      : null;
+
     if (matchedLabel) {
       document.getElementById("presetSelect").value = matchedLabel;
+      state.currentSlug = state.presets[matchedLabel].slug;
+      document.getElementById("variantIptv").checked = parsed.variant === "iptv";
+      document.getElementById("variantGracenote").checked = parsed.variant === "gracenote";
       await loadChannelsForPreset(matchedLabel, state.selectedOrder);
     } else {
       state.available = [];
@@ -306,6 +372,29 @@ document.getElementById("loadConfigBtn").addEventListener("click", async () => {
     renderSelected();
     document.getElementById("runMergeBtn").disabled = false;
     setStatus(statusEl, `Loaded ${data.channels.length} channels from ${name}.`, "ok");
+  } catch (e) {
+    setStatus(statusEl, "Error: " + e.message, "error");
+  }
+});
+
+document.getElementById("deleteConfigBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("status");
+  const sel = document.getElementById("configSelect");
+  const name = sel.value;
+  if (!name) { setStatus(statusEl, "Pick a saved config to delete first.", "error"); return; }
+  if (!window.confirm(`Delete "${name}" from disk? This can't be undone.`)) return;
+
+  try {
+    const res = await fetch(`/api/configs/${encodeURIComponent(name)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Delete failed");
+
+    setStatus(statusEl, `Deleted ${data.deleted}.`, "ok");
+    if (state.currentConfigName === name.replace(/\.txt$/, "")) {
+      state.currentConfigName = "";
+      document.getElementById("runMergeBtn").disabled = true;
+    }
+    await fetchConfigs();
   } catch (e) {
     setStatus(statusEl, "Error: " + e.message, "error");
   }
