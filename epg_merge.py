@@ -112,6 +112,18 @@ def sanitize_filename(filename: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "_", filename)
 
 
+def normalize_channel_name(raw: str) -> str:
+    """
+    Reduces a channel name/ID down to just its letters and digits, lowercased,
+    with any parenthetical codes stripped -- e.g. "AAJTAK(AAJTK).ca" and
+    "Aaj Tak HD" both normalize to "aajtak". Used to match a channel across
+    providers whose ID schemes don't line up (e.g. epg.guru's IPTV IDs vs.
+    Gracenote's own station IDs) via their human-readable name instead.
+    """
+    without_parens = re.sub(r"\([^()]*\)", "", raw)
+    return re.sub(r"[^a-z0-9]", "", without_parens.lower())
+
+
 class CacheManager:
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
@@ -184,6 +196,7 @@ def process_epg_sources(
     cached_files: List[Path],
     wanted_channels: Set[str],
     output_path: Path,
+    match_by_name: bool = False,
 ):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_output_path = output_path.with_suffix(".tmp")
@@ -193,6 +206,17 @@ def process_epg_sources(
 
     seen_channels: Set[str] = set()
     seen_programmes: Set[Tuple[str, str, str]] = set()
+    # When matching by name, the IDs we actually want to keep for programme
+    # filtering are the source's OWN channel ids (resolved below) -- not the
+    # wanted_channels strings themselves, which came from a different
+    # provider's naming scheme and won't appear anywhere in this feed.
+    resolved_ids: Set[str] = set()
+    matched_wanted_names: Set[str] = set()
+
+    if match_by_name:
+        wanted_by_normalized = {}
+        for w in wanted_channels:
+            wanted_by_normalized.setdefault(normalize_channel_name(w), w)
 
     generator_name = (
         "epg.guru v1.4.0 (f64ebb9-dirty) - in memory of Jesse Mann, the epg guru himself. Rest in peace, friend."
@@ -217,11 +241,26 @@ def process_epg_sources(
                         if event == "end":
                             if elem.tag == "channel":
                                 ch_id = elem.get("id")
-                                if ch_id in wanted_channels and ch_id not in seen_channels:
+                                is_match = False
+
+                                if match_by_name:
+                                    if ch_id not in seen_channels:
+                                        for dn in elem.findall("display-name"):
+                                            norm = normalize_channel_name(dn.text or "")
+                                            wanted_name = wanted_by_normalized.get(norm)
+                                            if wanted_name:
+                                                is_match = True
+                                                matched_wanted_names.add(wanted_name)
+                                                break
+                                else:
+                                    is_match = ch_id in wanted_channels
+
+                                if is_match and ch_id not in seen_channels:
                                     seen_channels.add(ch_id)
+                                    resolved_ids.add(ch_id)
                                     xml_bytes = etree.tostring(elem, encoding="utf-8", method="xml").strip()
                                     xml_out.write(xml_bytes + b"\n")
-                                    
+
                                     pct = min(100, int((len(seen_channels) / total_wanted) * 100))
                                     if len(seen_channels) % 5 == 0 or pct == 100:
                                         print(f"Loading channels ({pct}% done)...", flush=True)
@@ -229,7 +268,17 @@ def process_epg_sources(
                             root.clear()
 
                 print(f"Channels loaded ({len(seen_channels)} channels).", flush=True)
+                if match_by_name:
+                    unmatched = sorted(set(wanted_channels) - matched_wanted_names)
+                    if unmatched:
+                        print(
+                            f"WARNING: {len(unmatched)} wanted channel(s) had no name match in this "
+                            f"source and will be missing from the output: {', '.join(unmatched)}",
+                            flush=True,
+                        )
                 print(f"Loading programs (0% done progress bar)...", flush=True)
+
+                effective_wanted = resolved_ids if match_by_name else wanted_channels
 
                 prog_count = 0
                 with open(file_path, "rb") as stream:
@@ -244,7 +293,7 @@ def process_epg_sources(
                                 stop = elem.get("stop", "")
                                 prog_key = (ch_id, start, stop)
 
-                                if ch_id in wanted_channels and prog_key not in seen_programmes:
+                                if ch_id in effective_wanted and prog_key not in seen_programmes:
                                     seen_programmes.add(prog_key)
                                     xml_bytes = etree.tostring(elem, encoding="utf-8", method="xml").strip()
                                     xml_out.write(xml_bytes + b"\n")
@@ -350,7 +399,12 @@ def main():
         print("Done. Output is up to date.", flush=True)
         sys.exit(0)
 
-    process_epg_sources(cached_files, wanted_channels, output_xml)
+    process_epg_sources(
+        cached_files,
+        wanted_channels,
+        output_xml,
+        match_by_name=any("gracenote" in url.lower() for url in target_urls),
+    )
     compress_output(output_xml, output_gz, keep_uncompressed=not args.delete_uncompressed)
 
     print(f"Done. Successfully saved to {output_gz.name}.", flush=True)
