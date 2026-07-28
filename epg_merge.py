@@ -131,7 +131,14 @@ class CacheManager:
 
     def _get_base_filename(self, url: str) -> str:
         clean_url = url.split("?")[0].split("#")[0]
-        name = clean_url.split("/")[-1] or "epg_source.xml"
+        # Use the full path (not just the last segment) as the cache key.
+        # epg.guru's IPTV and Gracenote feeds both end in ".../Canada.xml" --
+        # only the parent directory ("7dayiptv" vs "7daygracenote") tells
+        # them apart, so dropping the path down to just the filename would
+        # let the two variants collide onto the same cache entry.
+        after_scheme = clean_url.split("://", 1)[-1]
+        path_only = after_scheme.split("/", 1)[-1] if "/" in after_scheme else after_scheme
+        name = path_only or "epg_source.xml"
         if name.endswith(".xml"):
             name = name[:-4]
         elif name.endswith(".xml.gz"):
