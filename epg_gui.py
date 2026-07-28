@@ -78,7 +78,8 @@ def sanitize_name(name: str) -> str:
 
 @app.route("/")
 def index():
-    return render_template("index.html", presets=EPG_GURU_PRESETS)
+    resp = render_template("index.html", presets=EPG_GURU_PRESETS)
+    return Response(resp, headers={"Cache-Control": "no-store"})
 
 
 @app.route("/api/presets")
