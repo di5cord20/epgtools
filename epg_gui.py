@@ -24,24 +24,24 @@ app = Flask(__name__)
 
 EPG_GURU_PRESETS = {
     "Canada": {
+        "slug": "Canada",
         "channel_list": "https://epg.guru/IPTV_Channel_List/Canada_channel_list.txt",
-        "xml_source": "https://cdn.epg.guru/7dayiptv/Canada.xml",
     },
     "United States": {
+        "slug": "UnitedStates",
         "channel_list": "https://epg.guru/IPTV_Channel_List/UnitedStates_channel_list.txt",
-        "xml_source": "https://cdn.epg.guru/7dayiptv/UnitedStates.xml",
     },
     "USFast": {
+        "slug": "USFast",
         "channel_list": "https://epg.guru/IPTV_Channel_List/USFast_channel_list.txt",
-        "xml_source": "https://cdn.epg.guru/7dayiptv/USFast.xml",
     },
     "United Kingdom": {
+        "slug": "UnitedKingdom",
         "channel_list": "https://epg.guru/IPTV_Channel_List/UnitedKingdom_channel_list.txt",
-        "xml_source": "https://cdn.epg.guru/7dayiptv/UnitedKingdom.xml",
     },
     "Australia": {
+        "slug": "Australia",
         "channel_list": "https://epg.guru/IPTV_Channel_List/Australia_channel_list.txt",
-        "xml_source": "https://cdn.epg.guru/7dayiptv/Australia.xml",
     },
 }
 
@@ -124,6 +124,19 @@ def api_load_config(name):
         "xml_source": sources[0] if sources else "",
         "channels": sorted(channels),
     })
+
+
+@app.route("/api/configs/<name>", methods=["DELETE"])
+def api_delete_config(name):
+    # Path(name).name strips any directory components -- confines the
+    # delete to a plain filename inside CONFIG_DIR, same protection the
+    # other endpoints get from sanitize_name.
+    file_path = CONFIG_DIR / Path(name).name
+    if file_path.suffix != ".txt" or not file_path.exists():
+        return jsonify({"error": "Config file not found"}), 404
+
+    file_path.unlink()
+    return jsonify({"deleted": file_path.name})
 
 
 @app.route("/api/configs/<name>", methods=["POST"])
