@@ -353,19 +353,6 @@ def main():
     cache_dir = Path(args.cache_dir)
     input_list_file = Path(args.input_list)
 
-    if args.output is None:
-        stem = input_list_file.stem
-        if stem.endswith("_full"):
-            stem = stem[:-5]
-        output_xml = Path("./data") / f"{stem}.xml"
-    else:
-        output_xml = Path(args.output)
-
-    if output_xml.suffix == ".gz":
-        output_xml = output_xml.with_suffix("")
-
-    output_gz = Path(f"{output_xml}.gz")
-
     wanted_channels, target_urls = load_aggregated_wanted_channels_and_sources(input_list_file)
 
     if not target_urls:
@@ -376,6 +363,26 @@ def main():
     if not wanted_channels or not target_urls:
         print("Error: Invalid configuration or missing channels/sources.", flush=True)
         sys.exit(1)
+
+    is_gracenote = any("gracenote" in url.lower() for url in target_urls)
+    variant_suffix = "gracenote" if is_gracenote else "iptv"
+
+    if args.output is None:
+        stem = input_list_file.stem
+        if stem.endswith("_full"):
+            stem = stem[:-5]
+        # e.g. can.txt -> data/can-iptv.xml.gz or data/can-gracenote.xml.gz,
+        # so both variants of the same config can coexist without clobbering
+        # each other. Only applied to the auto-derived name -- an explicit
+        # -o path is used as given.
+        output_xml = Path("./data") / f"{stem}-{variant_suffix}.xml"
+    else:
+        output_xml = Path(args.output)
+
+    if output_xml.suffix == ".gz":
+        output_xml = output_xml.with_suffix("")
+
+    output_gz = Path(f"{output_xml}.gz")
 
     cache_mgr = CacheManager(cache_dir)
     cached_files = []
@@ -403,7 +410,7 @@ def main():
         cached_files,
         wanted_channels,
         output_xml,
-        match_by_name=any("gracenote" in url.lower() for url in target_urls),
+        match_by_name=is_gracenote,
     )
     compress_output(output_xml, output_gz, keep_uncompressed=not args.delete_uncompressed)
 
